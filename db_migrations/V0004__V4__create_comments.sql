@@ -1,0 +1,1 @@
+CREATE TABLE t_p23442598_alumni_network_app.comments (id SERIAL PRIMARY KEY, post_id INT REFERENCES t_p23442598_alumni_network_app.posts(id), author_name VARCHAR(100) NOT NULL, author_initials VARCHAR(4) NOT NULL, text TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW())

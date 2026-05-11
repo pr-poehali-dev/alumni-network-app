@@ -1,0 +1,1 @@
+CREATE TABLE t_p23442598_alumni_network_app.likes (id SERIAL PRIMARY KEY, post_id INT REFERENCES t_p23442598_alumni_network_app.posts(id), session_id VARCHAR(100) NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW(), UNIQUE(post_id, session_id))

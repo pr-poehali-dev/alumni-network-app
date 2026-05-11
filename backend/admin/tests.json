@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "GET stats without token - forbidden",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 403,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET stats with token",
+      "method": "GET",
+      "path": "/",
+      "headers": {"X-Admin-Token": "admin123"},
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    }
+  ]
+}

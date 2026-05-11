@@ -1,24 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
-
-type Post = {
-  id: number; author: string; initials: string; school: string;
-  time: string; text: string; likes: number; comments: number; liked: boolean;
-};
-
-type Comment = { id: number; author: string; initials: string; text: string; time: string };
-
-const initPosts: Post[] = [
-  { id: 1, author: "Алина Соколова", initials: "АС", school: "Школа №47, выпуск 2018", time: "2 часа назад", text: "Не верится, что прошло уже 6 лет с выпускного! 🎓 Кто помнит, как мы отмечали на крыше Коли? Лучший вечер в жизни", likes: 34, comments: 1, liked: false },
-  { id: 2, author: "Максим Воронов", initials: "МВ", school: "Школа №47, выпуск 2018", time: "5 часов назад", text: "Ребята, организую встречу выпускников в июне! Кто за? Планирую в кафе «Летний» на Садовой. Пишите в личку или комментируйте", likes: 51, comments: 19, liked: true },
-  { id: 3, author: "Дарья Климова", initials: "ДК", school: "Школа №47, выпуск 2019", time: "вчера", text: "Нашла старые фотки с последнего звонка 📸 Какие же мы были маленькие! Время летит невероятно быстро. Всех люблю ♥", likes: 88, comments: 24, liked: false },
-];
-
-const initComments: Record<number, Comment[]> = {
-  1: [{ id: 1, author: "Игорь П.", initials: "ИП", text: "Да, я тоже помню! Было незабываемо 🔥", time: "1 час назад" }],
-  2: [],
-  3: [],
-};
+import { fetchPosts, createPost, toggleLike, fetchComments, addComment, type Post, type Comment } from "@/lib/api";
 
 const stories = [
   { name: "Моя история", initials: "Я", isAdd: true },
@@ -45,10 +27,13 @@ const commentColors = [
 ];
 
 export default function Feed() {
-  const [posts, setPosts] = useState<Post[]>(initPosts);
-  const [comments, setComments] = useState<Record<number, Comment[]>>(initComments);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [comments, setComments] = useState<Record<number, Comment[]>>({});
   const [postText, setPostText] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [openComments, setOpenComments] = useState<number | null>(null);
+  const [loadingComments, setLoadingComments] = useState<number | null>(null);
   const [commentText, setCommentText] = useState<Record<number, string>>({});
   const [toast, setToast] = useState<string | null>(null);
 
@@ -57,53 +42,84 @@ export default function Feed() {
     setTimeout(() => setToast(null), 2000);
   };
 
-  const toggleLike = (id: number) => {
+  useEffect(() => {
+    fetchPosts()
+      .then(setPosts)
+      .catch(() => showToast("Ошибка загрузки постов"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleToggleLike = async (id: number) => {
+    // Оптимистичное обновление
     setPosts((prev) =>
       prev.map((p) =>
-        p.id === id
-          ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 }
-          : p
+        p.id === id ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 } : p
       )
     );
+    try {
+      const result = await toggleLike(id);
+      setPosts((prev) =>
+        prev.map((p) => p.id === id ? { ...p, liked: result.liked, likes: result.likes } : p)
+      );
+    } catch {
+      // Откат при ошибке
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === id ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 } : p
+        )
+      );
+    }
   };
 
-  const publishPost = () => {
-    if (!postText.trim()) return;
-    const newPost: Post = {
-      id: Date.now(),
-      author: "Я",
-      initials: "Я",
-      school: "Школа №47, выпуск 2018",
-      time: "только что",
-      text: postText.trim(),
-      likes: 0,
-      comments: 0,
-      liked: false,
-    };
-    setPosts((prev) => [newPost, ...prev]);
-    setComments((prev) => ({ ...prev, [newPost.id]: [] }));
-    setPostText("");
-    showToast("Публикация опубликована!");
+  const handlePublish = async () => {
+    if (!postText.trim() || publishing) return;
+    setPublishing(true);
+    try {
+      const post = await createPost(postText.trim());
+      if (post) {
+        setPosts((prev) => [post, ...prev]);
+        setPostText("");
+        showToast("Публикация опубликована!");
+      }
+    } catch {
+      showToast("Ошибка публикации");
+    } finally {
+      setPublishing(false);
+    }
   };
 
-  const sendComment = (postId: number) => {
+  const handleOpenComments = async (postId: number) => {
+    if (openComments === postId) {
+      setOpenComments(null);
+      return;
+    }
+    setOpenComments(postId);
+    if (!comments[postId]) {
+      setLoadingComments(postId);
+      try {
+        const result = await fetchComments(postId);
+        setComments((prev) => ({ ...prev, [postId]: result }));
+      } catch {
+        setComments((prev) => ({ ...prev, [postId]: [] }));
+      } finally {
+        setLoadingComments(null);
+      }
+    }
+  };
+
+  const handleSendComment = async (postId: number) => {
     const text = commentText[postId]?.trim();
     if (!text) return;
-    const newComment: Comment = {
-      id: Date.now(),
-      author: "Я",
-      initials: "Я",
-      text,
-      time: "только что",
-    };
-    setComments((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), newComment] }));
-    setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, comments: p.comments + 1 } : p));
     setCommentText((prev) => ({ ...prev, [postId]: "" }));
-  };
-
-  const deletePost = (id: number) => {
-    setPosts((prev) => prev.filter((p) => p.id !== id));
-    showToast("Публикация удалена");
+    try {
+      const comment = await addComment(postId, text);
+      if (comment) {
+        setComments((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
+        setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, comments: p.comments + 1 } : p));
+      }
+    } catch {
+      showToast("Ошибка отправки комментария");
+    }
   };
 
   return (
@@ -136,7 +152,7 @@ export default function Feed() {
           <textarea
             value={postText}
             onChange={(e) => setPostText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) publishPost(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handlePublish(); }}
             placeholder="Что нового, выпускник? (Ctrl+Enter для публикации)"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none min-h-[48px] leading-relaxed"
             rows={2}
@@ -154,14 +170,22 @@ export default function Feed() {
             </button>
           </div>
           <button
-            onClick={publishPost}
-            disabled={!postText.trim()}
-            className="px-4 py-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium disabled:opacity-30 hover:opacity-90 transition-opacity"
+            onClick={handlePublish}
+            disabled={!postText.trim() || publishing}
+            className="px-4 py-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium disabled:opacity-30 hover:opacity-90 transition-opacity flex items-center gap-1.5"
           >
+            {publishing && <Icon name="Loader2" size={14} className="animate-spin" />}
             Опубликовать
           </button>
         </div>
       </div>
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Icon name="Loader2" size={28} className="text-primary animate-spin" />
+        </div>
+      )}
 
       {/* Posts */}
       {posts.map((post, idx) => (
@@ -172,7 +196,7 @@ export default function Feed() {
         >
           <div className="flex items-start justify-between">
             <div className="flex gap-3 items-center">
-              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colors[(post.id) % colors.length]} flex items-center justify-center shrink-0`}>
+              <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${post.color || colors[idx % colors.length]} flex items-center justify-center shrink-0`}>
                 <span className="text-white text-sm font-semibold">{post.initials}</span>
               </div>
               <div>
@@ -180,12 +204,8 @@ export default function Feed() {
                 <div className="text-xs text-muted-foreground">{post.school} · {post.time}</div>
               </div>
             </div>
-            <button
-              onClick={() => deletePost(post.id)}
-              className="text-muted-foreground hover:text-red-400 transition-colors p-1"
-              title="Удалить публикацию"
-            >
-              <Icon name="Trash2" size={16} />
+            <button className="text-muted-foreground hover:text-foreground transition-colors p-1">
+              <Icon name="MoreHorizontal" size={18} />
             </button>
           </div>
 
@@ -193,7 +213,7 @@ export default function Feed() {
 
           <div className="flex items-center gap-1 pt-1 border-t border-border/40">
             <button
-              onClick={() => toggleLike(post.id)}
+              onClick={() => handleToggleLike(post.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm transition-all ${
                 post.liked
                   ? "text-pink-400 bg-pink-500/10"
@@ -204,7 +224,7 @@ export default function Feed() {
               <span>{post.likes}</span>
             </button>
             <button
-              onClick={() => setOpenComments(openComments === post.id ? null : post.id)}
+              onClick={() => handleOpenComments(post.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm transition-all ${
                 openComments === post.id ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"
               }`}
@@ -215,7 +235,7 @@ export default function Feed() {
             <button
               onClick={() => {
                 navigator.clipboard?.writeText(post.text).catch(() => {});
-                showToast("Ссылка скопирована");
+                showToast("Скопировано!");
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all ml-auto"
             >
@@ -226,6 +246,11 @@ export default function Feed() {
 
           {openComments === post.id && (
             <div className="space-y-3 pt-2 border-t border-border/40">
+              {loadingComments === post.id && (
+                <div className="flex justify-center py-3">
+                  <Icon name="Loader2" size={18} className="text-primary animate-spin" />
+                </div>
+              )}
               {(comments[post.id] || []).map((c, ci) => (
                 <div key={c.id} className="flex gap-2.5">
                   <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${c.initials === "Я" ? "from-violet-500 to-purple-700" : commentColors[ci % commentColors.length]} flex items-center justify-center shrink-0`}>
@@ -248,12 +273,12 @@ export default function Feed() {
                   <input
                     value={commentText[post.id] || ""}
                     onChange={(e) => setCommentText((prev) => ({ ...prev, [post.id]: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") sendComment(post.id); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleSendComment(post.id); }}
                     placeholder="Написать комментарий..."
                     className="flex-1 bg-secondary/60 rounded-xl px-3 py-2 text-xs outline-none placeholder:text-muted-foreground border border-border/50 focus:border-primary/50 transition-colors"
                   />
                   <button
-                    onClick={() => sendComment(post.id)}
+                    onClick={() => handleSendComment(post.id)}
                     disabled={!commentText[post.id]?.trim()}
                     className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30"
                   >
@@ -266,7 +291,13 @@ export default function Feed() {
         </div>
       ))}
 
-      {/* Toast */}
+      {!loading && posts.length === 0 && (
+        <div className="text-center py-16 text-muted-foreground">
+          <Icon name="FileText" size={36} className="mx-auto mb-3 opacity-30" />
+          <div className="text-sm">Пока нет публикаций — будьте первым!</div>
+        </div>
+      )}
+
       {toast && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl bg-foreground text-background text-sm font-medium shadow-xl animate-fade-in whitespace-nowrap">
           {toast}
